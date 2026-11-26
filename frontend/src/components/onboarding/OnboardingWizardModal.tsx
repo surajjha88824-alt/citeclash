@@ -100,15 +100,42 @@ export const OnboardingWizardModal: React.FC<OnboardingWizardModalProps> = ({
         .replace(/\/.*$/, "")
         .trim();
 
+      const resolvedDomain =
+        cleanDomain || brandName.toLowerCase().replace(/\s+/g, "") + ".com";
+      const resolvedBrand = brandName.trim() || resolvedDomain.split(".")[0];
+
+      // 1. Create the real Workspace in PostgreSQL/SQLite for the logged-in user
+      let createdWorkspace: any = null;
+      try {
+        const wsRes = await apiClient.post("/workspaces/", {
+          brand_name: resolvedBrand,
+          domain_url: resolvedDomain,
+          industry: industry,
+        });
+        createdWorkspace = wsRes.data;
+        window.dispatchEvent(new Event("citeclash:workspace-created"));
+      } catch (wsErr: any) {
+        const detail = wsErr?.response?.data?.detail;
+        const msg =
+          (typeof detail === "object" ? detail?.message : detail) ||
+          wsErr?.response?.data?.error?.message;
+        if (wsErr?.response?.status === 402 && msg) {
+          setErrorMsg(msg);
+          setSubmittingAudit(false);
+          return;
+        }
+      }
+
+      // 2. Run initial visibility audit
       const res = await apiClient.post("/audits/run", {
-        brand_domain: cleanDomain || brandName.toLowerCase().replace(/\s+/g, "") + ".com",
+        brand_domain: resolvedDomain,
         competitor_domain: cleanComp || "competitor.com",
         industry: industry,
         custom_prompts: prompts.length > 0 ? prompts : undefined,
       });
 
       localStorage.setItem("rankpulse_onboarded", "true");
-      onComplete(res.data);
+      onComplete({ ...res.data, workspace: createdWorkspace });
     } catch {
       localStorage.setItem("rankpulse_onboarded", "true");
       onComplete({ status: "completed", fallback: true });

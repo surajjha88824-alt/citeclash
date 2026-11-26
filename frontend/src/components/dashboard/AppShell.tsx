@@ -131,11 +131,14 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [overviewMetricTab, setOverviewMetricTab] = useState<"Visibility" | "Sentiment" | "Position">("Visibility");
   const [overviewSourceTab, setOverviewSourceTab] = useState<"Domains" | "URLs">("Domains");
 
-  const [workspaces] = useState<WorkspaceOption[]>([
-    { id: "ws-1", name: "Supabase Cloud", plan: "Growth", domain: "supabase.com" },
-    { id: "ws-2", name: "Linear App", plan: "Starter", domain: "linear.app" },
-  ]);
-  const [selectedWs, setSelectedWs] = useState<WorkspaceOption>(workspaces[0]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
+  const [selectedWs, setSelectedWs] = useState<WorkspaceOption | null>(null);
+  const [workspacesLoading, setWorkspacesLoading] = useState<boolean>(true);
+  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
+  const [quickBrand, setQuickBrand] = useState("");
+  const [quickDomain, setQuickDomain] = useState("");
+  const [creatingWs, setCreatingWs] = useState(false);
+  const [createWsError, setCreateWsError] = useState<string | null>(null);
 
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [limitModalMessage, setLimitModalMessage] = useState<string | undefined>(undefined);
@@ -202,7 +205,90 @@ export const AppShell: React.FC<AppShellProps> = ({
   >([]);
   const [suggestingPrompts, setSuggestingPrompts] = useState(false);
 
+  const loadWorkspaces = async () => {
+    setWorkspacesLoading(true);
+    setWorkspacesError(null);
+    try {
+      const res = await apiClient.get("/workspaces/");
+      const rows = (res.data?.workspaces || []).map((w: any) => ({
+        id: w.id,
+        name: w.brand_name,
+        plan: w.plan_tier
+          ? w.plan_tier.charAt(0).toUpperCase() + w.plan_tier.slice(1)
+          : "Free",
+        domain: w.domain_url,
+      })) as WorkspaceOption[];
+      setWorkspaces(rows);
+      setSelectedWs((prev) => {
+        if (prev && rows.some((r) => r.id === prev.id)) return prev;
+        return rows[0] || null;
+      });
+    } catch (err: any) {
+      setWorkspacesError(
+        err?.response?.data?.error?.message ||
+          "Could not load your workspaces. Please try again."
+      );
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadWorkspaces();
+    const onWorkspaceCreated = () => {
+      loadWorkspaces();
+    };
+    window.addEventListener("citeclash:workspace-created", onWorkspaceCreated);
+    return () => {
+      window.removeEventListener("citeclash:workspace-created", onWorkspaceCreated);
+    };
+  }, []);
+
+  const handleQuickCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const brand = quickBrand.trim();
+    const domain = quickDomain
+      .trim()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
+    if (!brand || !domain) {
+      setCreateWsError("Please enter both your Brand Name and Website Domain.");
+      return;
+    }
+    setCreatingWs(true);
+    setCreateWsError(null);
+    try {
+      const res = await apiClient.post("/workspaces/", {
+        brand_name: brand,
+        domain_url: domain,
+      });
+      const w = res.data;
+      const created: WorkspaceOption = {
+        id: w.id,
+        name: w.brand_name,
+        plan: w.plan_tier
+          ? w.plan_tier.charAt(0).toUpperCase() + w.plan_tier.slice(1)
+          : "Free",
+        domain: w.domain_url,
+      };
+      setWorkspaces((prev) => [created, ...prev]);
+      setSelectedWs(created);
+      setQuickBrand("");
+      setQuickDomain("");
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setCreateWsError(
+        (typeof detail === "object" ? detail?.message : detail) ||
+          err?.response?.data?.error?.message ||
+          "Failed to create workspace."
+      );
+    } finally {
+      setCreatingWs(false);
+    }
+  };
+
   const loadProofData = async () => {
+    if (!selectedWs) return;
     setDashboardError(null);
     try {
       const [movesRes, trafficRes, roiRes] = await Promise.all([
@@ -233,10 +319,13 @@ export const AppShell: React.FC<AppShellProps> = ({
   };
 
   useEffect(() => {
-    loadProofData();
-  }, [selectedWs.id]);
+    if (selectedWs?.id) {
+      loadProofData();
+    }
+  }, [selectedWs?.id]);
 
   const handleSuggestPrompts = async () => {
+    if (!selectedWs) return;
     setSuggestingPrompts(true);
     try {
       const res = await apiClient.post(`/workspaces/${selectedWs.id}/prompts/suggest`, {
@@ -354,7 +443,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const handleAddPrompt = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPromptText.trim()) return;
+    if (!newPromptText.trim() || !selectedWs) return;
     const newEntry: PromptMatrixItem = {
       id: `p-${Date.now()}`,
       text: newPromptText.trim(),
@@ -392,7 +481,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   };
 
   const renderHighlightedText = (text: string) => {
-    const brandName = selectedWs.domain.split(".")[0];
+    const brandName = (selectedWs?.domain || "brand").split(".")[0];
     const compName = "firebase";
     const regex = new RegExp(`(${brandName}|${compName})`, "gi");
     const parts = text.split(regex);
@@ -429,6 +518,142 @@ export const AppShell: React.FC<AppShellProps> = ({
   });
 
   const activeTrend = visibilitySeriesByModel[modelFilter];
+
+  if (workspacesLoading) {
+    return (
+      <div className="min-h-screen bg-[#F7F7F8] flex items-center justify-center p-6 text-[#111113]">
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl p-8 max-w-md w-full text-center space-y-3">
+          <div className="w-8 h-8 rounded-full border-2 border-[#111113] border-t-transparent animate-spin mx-auto" />
+          <div className="text-sm font-semibold">Loading your workspaces...</div>
+          <p className="text-xs text-[#52525B]">
+            Syncing your brand visibility &amp; AI audit console.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (workspacesError) {
+    return (
+      <div className="min-h-screen bg-[#F7F7F8] flex items-center justify-center p-6 text-[#111113]">
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl p-8 max-w-md w-full space-y-4">
+          <div className="text-xs font-mono uppercase tracking-wider text-[#E11D48]">
+            Workspace Sync Error
+          </div>
+          <h2 className="text-lg font-semibold text-[#111113]">
+            Could not load your workspaces
+          </h2>
+          <p className="text-xs text-[#52525B]">{workspacesError}</p>
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={loadWorkspaces}
+              className="px-4 py-2 rounded-lg bg-[#111113] text-white text-xs font-medium hover:bg-[#27272A] cursor-pointer"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2 rounded-lg bg-white text-[#111113] border border-[#D4D4D8] hover:border-[#111113] text-xs font-medium cursor-pointer"
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedWs) {
+    return (
+      <div className="min-h-screen bg-[#F7F7F8] flex flex-col justify-between p-6 text-[#111113]">
+        <div className="max-w-2xl w-full mx-auto flex items-center justify-between py-2">
+          <button
+            type="button"
+            onClick={onBackToLanding}
+            className="text-xs font-medium text-[#52525B] hover:text-[#111113] cursor-pointer"
+          >
+            &larr; Back to Home
+          </button>
+          <div className="flex items-center gap-3">
+            {activeUser?.email && (
+              <span className="text-xs font-mono text-[#71717A]">{activeUser.email}</span>
+            )}
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-3 py-1.5 rounded-lg bg-white text-[#111113] border border-[#D4D4D8] hover:border-[#111113] text-xs font-medium cursor-pointer"
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+
+        <div className="max-w-lg w-full mx-auto bg-white border border-[#E5E7EB] rounded-2xl p-8 space-y-6 my-auto">
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-wider text-[#16A34A] font-semibold">
+              Fresh Account Ready
+            </div>
+            <h1 className="text-2xl font-semibold tracking-[-0.025em] text-[#111113] mt-1">
+              Create your first workspace
+            </h1>
+            <p className="text-sm text-[#52525B] mt-1.5">
+              Enter your brand name and website domain to start tracking AI citations across ChatGPT, Perplexity, and Gemini.
+            </p>
+          </div>
+
+          {createWsError && (
+            <div className="p-3 rounded-xl bg-[#FFF1F2] border border-[#FECDD3] text-[#E11D48] text-xs font-medium">
+              {createWsError}
+            </div>
+          )}
+
+          <form onSubmit={handleQuickCreateWorkspace} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[#111113] mb-1.5">
+                Brand Name
+              </label>
+              <input
+                type="text"
+                required
+                value={quickBrand}
+                onChange={(e) => setQuickBrand(e.target.value)}
+                placeholder="e.g. Acme Cloud"
+                className="w-full h-11 px-3.5 rounded-xl bg-white border border-[#D4D4D8] focus:border-[#111113] text-sm text-[#111113] placeholder-[#71717A] outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#111113] mb-1.5">
+                Website Domain
+              </label>
+              <input
+                type="text"
+                required
+                value={quickDomain}
+                onChange={(e) => setQuickDomain(e.target.value)}
+                placeholder="e.g. acme.com"
+                className="w-full h-11 px-3.5 rounded-xl bg-white border border-[#D4D4D8] focus:border-[#111113] text-sm text-[#111113] placeholder-[#71717A] outline-none"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={creatingWs}
+              className="w-full h-11 px-4 rounded-xl bg-[#111113] text-white hover:bg-[#27272A] text-sm font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {creatingWs ? "Creating workspace..." : "Create Workspace & Open Console →"}
+            </button>
+          </form>
+        </div>
+
+        <div className="text-center text-[11px] font-mono text-[#71717A]">
+          Free Plan includes 50 tracked prompts/month &amp; AI Crawlability Audit.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <AppLayout
