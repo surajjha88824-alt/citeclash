@@ -1,0 +1,54 @@
+# Robots.txt for CiteClash (https://citeclash.com)
+User-agent: *
+Allow: /
+Allow: /compare
+Allow: /compare/*
+Allow: /alternatives/*
+Allow: /best-geo-tools
+Allow: /trackers/*
+Allow: /tools/*
+Allow: /guides
+Allow: /guides/*
+Allow: /battle/*
+Allow: /privacy-policy
+Allow: /terms-of-service
+Allow: /refund-policy
+Allow: /contact
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /admin
+Disallow: /api/
+
+# AI Search Crawlers & Indexers
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://citeclash.com/sitemap.xml
+# LLM Ingestion Endpoint: https://citeclash.com/llms.txt
